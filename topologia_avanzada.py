@@ -1,0 +1,296 @@
+import requests
+import time
+import sys
+from requests.auth import HTTPBasicAuth
+
+# --- 1. CONFIGURACIÓN DEL SERVIDOR ---
+GNS3_IP = "127.0.0.1"
+GNS3_PORT = "3080"
+BASE_URL = f"http://{GNS3_IP}:{GNS3_PORT}/v2"
+PROJECT_NAME = "Topolog_avanzanda" 
+AUTH = HTTPBasicAuth('admin', 'admin')
+
+# --- 2. DATOS DE HARDWARE ---
+ROUTER_IMAGE = "c3660-a3jk9s-mz.124-15.T14.image"
+ROUTER_PLATFORM = "c3600"
+ROUTER_CHASSIS = "3660"
+ROUTER_RAM = 192
+
+ROUTER_TEMPLATE_NAME = "cisco-3600"
+SWITCH_TEMPLATE_NAME = "Ethernet switch"
+PC_TEMPLATE_NAME = "VPCS"
+
+# --- 3. CONFIGURACIONES IOS (OSPF Malla Central) ---
+configs = {
+    "R3": """!
+hostname R3_Borde
+!
+interface FastEthernet0/0
+ description Hacia_Cloud_Internet
+ ip address dhcp
+ no shutdown
+!
+interface FastEthernet0/1
+ description Hacia_R2_Core
+ ip address 10.10.10.1 255.255.255.252
+ no shutdown
+!
+router ospf 1
+ network 10.10.10.0 0.0.0.3 area 0
+!
+""",
+    "R2_Core": """!
+hostname R2_Core
+!
+interface FastEthernet0/0
+ description Hacia_R3
+ ip address 10.10.10.2 255.255.255.252
+ no shutdown
+!
+interface FastEthernet0/1
+ description Hacia_R2_Left
+ ip address 10.10.10.9 255.255.255.252
+ no shutdown
+!
+interface FastEthernet1/0
+ description Hacia_R2_Right
+ ip address 10.10.10.5 255.255.255.252
+ no shutdown
+!
+interface FastEthernet2/0
+ description Gateway_Bloque_Servidores
+ ip address 192.168.100.1 255.255.255.0
+ no shutdown
+!
+router ospf 1
+ network 10.10.10.0 0.0.0.3 area 0
+ network 10.10.10.8 0.0.0.3 area 0
+ network 10.10.10.4 0.0.0.3 area 0
+ network 192.168.100.0 0.0.0.255 area 0
+!
+""",
+    "R2_Left": """!
+hostname R2_Left
+!
+interface FastEthernet0/0
+ description Hacia_R2_Core
+ ip address 10.10.10.10 255.255.255.252
+ no shutdown
+!
+interface FastEthernet0/1
+ description Hacia_R2_Right
+ ip address 10.10.10.13 255.255.255.252
+ no shutdown
+!
+interface FastEthernet1/0
+ description Gateway_LAN_A
+ ip address 192.168.10.1 255.255.255.0
+ no shutdown
+!
+interface FastEthernet2/0
+ description Gateway_LAN_B
+ ip address 192.168.20.1 255.255.255.0
+ no shutdown
+!
+router ospf 1
+ network 10.10.10.8 0.0.0.3 area 0
+ network 10.10.10.12 0.0.0.3 area 0
+ network 192.168.10.0 0.0.0.255 area 0
+ network 192.168.20.0 0.0.0.255 area 0
+!
+""",
+    "R2_Right": """!
+hostname R2_Right
+!
+interface FastEthernet0/0
+ description Hacia_R2_Core
+ ip address 10.10.10.6 255.255.255.252
+ no shutdown
+!
+interface FastEthernet0/1
+ description Hacia_R2_Left
+ ip address 10.10.10.14 255.255.255.252
+ no shutdown
+!
+interface FastEthernet1/0
+ description Gateway_LAN_C
+ ip address 192.168.30.1 255.255.255.0
+ no shutdown
+!
+interface FastEthernet2/0
+ description Gateway_LAN_D
+ ip address 192.168.40.1 255.255.255.0
+ no shutdown
+!
+router ospf 1
+ network 10.10.10.4 0.0.0.3 area 0
+ network 10.10.10.12 0.0.0.3 area 0
+ network 192.168.30.0 0.0.0.255 area 0
+ network 192.168.40.0 0.0.0.255 area 0
+!
+"""
+}
+
+# --- FUNCIONES DE LA API ---
+def get_template_id(name):
+    try:
+        resp = requests.get(f"{BASE_URL}/templates", auth=AUTH)
+        for t in resp.json():
+            if t['name'] == name:
+                return t['template_id']
+        print(f"❌ Plantilla '{name}' no encontrada.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        sys.exit(1)
+
+def create_advanced_router(project_id, name, template_id, x, y):
+    payload = {
+        "name": name, "node_type": "dynamips", "template_id": template_id,
+        "x": x, "y": y, "compute_id": "local", "symbol": ":/symbols/classic/router.svg",
+        "properties": {
+            "platform": ROUTER_PLATFORM, "chassis": ROUTER_CHASSIS, "image": ROUTER_IMAGE, "ram": ROUTER_RAM,
+            "slot0": "Leopard-2FE", "slot1": "NM-1FE-TX", "slot2": "NM-1FE-TX", "slot3": "NM-1FE-TX" 
+        }
+    }
+    resp = requests.post(f"{BASE_URL}/projects/{project_id}/nodes", json=payload, auth=AUTH)
+    return resp.json()['node_id']
+
+def create_device(project_id, name, template_id, x, y, node_type, symbol=None):
+    payload = {
+        "name": name, "node_type": node_type, "template_id": template_id,
+        "x": x, "y": y, "compute_id": "local", "properties": {}
+    }
+    # INYECCIÓN DEL ICONO CORRECTO
+    if symbol: payload["symbol"] = symbol
+    resp = requests.post(f"{BASE_URL}/projects/{project_id}/nodes", json=payload, auth=AUTH)
+    return resp.json()['node_id']
+
+def create_link(project_id, node_a, adapter_a, port_a, node_b, adapter_b, port_b):
+    payload = {"nodes": [{"node_id": node_a, "adapter_number": adapter_a, "port_number": port_a},
+                         {"node_id": node_b, "adapter_number": adapter_b, "port_number": port_b}]}
+    requests.post(f"{BASE_URL}/projects/{project_id}/links", json=payload, auth=AUTH)
+
+def upload_config(project_id, node_id, config_text):
+    requests.post(f"{BASE_URL}/projects/{project_id}/nodes/{node_id}/files/startup-config.cfg", data=config_text, auth=AUTH)
+
+def create_drawing(project_id, x, y, width, height, color):
+    """Genera rectángulos de color en el fondo de GNS3 usando SVG"""
+    svg = f'<svg width="{width}" height="{height}"><rect width="{width}" height="{height}" fill="{color}" fill-opacity="0.3" stroke="{color}" stroke-width="2" /></svg>'
+    payload = {
+        "x": x,
+        "y": y,
+        "z": -1, # Envía el cuadrado al fondo (detrás de los routers)
+        "svg": svg
+    }
+    requests.post(f"{BASE_URL}/projects/{project_id}/drawings", json=payload, auth=AUTH)
+
+def main():
+    print(f"🔌 Conectando a GNS3... Preparando Topología Avanzada.")
+
+    router_id = get_template_id(ROUTER_TEMPLATE_NAME)
+    switch_id = get_template_id(SWITCH_TEMPLATE_NAME)
+    pc_id = get_template_id(PC_TEMPLATE_NAME)
+
+    # Limpiar/Crear Proyecto
+    resp = requests.get(f"{BASE_URL}/projects", auth=AUTH)
+    for p in resp.json():
+        if p['name'] == PROJECT_NAME:
+            print("♻️  Limpiando proyecto existente...")
+            requests.delete(f"{BASE_URL}/projects/{p['project_id']}", auth=AUTH)
+            time.sleep(3)
+            break
+    resp = requests.post(f"{BASE_URL}/projects", json={"name": PROJECT_NAME}, auth=AUTH)
+    project_id = resp.json()['project_id']
+    print(f"🔨 Proyecto '{PROJECT_NAME}' creado.")
+
+    # 3. DIBUJAR ZONAS DE COLORES (NUEVO)
+    print("🎨 Pintando las zonas LAN y Bloque de Servidores...")
+    # Azul (LAN A y B)
+    create_drawing(project_id, -450, 130, 420, 250, "#4169E1")
+    # Verde (LAN C y D)
+    create_drawing(project_id, 0, 130, 400, 250, "#2E8B57")
+    # Morado (Servidores)
+    create_drawing(project_id, 330, -450, 360, 330, "#9370DB")
+
+    # 4. CREAR NODOS
+    print("📦 Desplegando el núcleo de alta disponibilidad y switches reales...")
+    nodes = {}
+    
+    # Routers (Forma de Diamante)
+    nodes['R3'] = create_advanced_router(project_id, "Router R3", router_id, 0, -400)
+    nodes['R2_Core'] = create_advanced_router(project_id, "Router R2_Core", router_id, 0, -200)
+    nodes['R2_Left'] = create_advanced_router(project_id, "Router R2_Left", router_id, -200, 0)
+    nodes['R2_Right'] = create_advanced_router(project_id, "Router R2_Right", router_id, 200, 0)
+    
+    # Nube Internet
+    nodes['Cloud'] = create_device(project_id, "Cloud Internet", pc_id, -200, -500, "vpcs", ":/symbols/classic/cloud.svg")
+    
+    # Bloque de Servidores (Morado) -> CORREGIDO AL ICONO DE SWITCH
+    nodes['SW_Srv'] = create_device(project_id, "Switch Srv", switch_id, 400, -300, "ethernet_switch", ":/symbols/classic/ethernet_switch.svg")
+    nodes['Srv_Web'] = create_device(project_id, "Servidor Web", pc_id, 600, -400, "vpcs", ":/symbols/classic/server.svg")
+    nodes['Srv_DNS'] = create_device(project_id, "Servidor DNS", pc_id, 600, -300, "vpcs", ":/symbols/classic/server.svg")
+    nodes['Srv_FTP'] = create_device(project_id, "Servidor FTP", pc_id, 500, -200, "vpcs", ":/symbols/classic/server.svg")
+
+    # Edificio LAN A y B (Azul) -> CORREGIDO AL ICONO DE SWITCH
+    nodes['SW_A'] = create_device(project_id, "Switch LAN A", switch_id, -300, 200, "ethernet_switch", ":/symbols/classic/ethernet_switch.svg")
+    nodes['SW_B'] = create_device(project_id, "Switch LAN B", switch_id, -100, 200, "ethernet_switch", ":/symbols/classic/ethernet_switch.svg")
+    nodes['PC_Ventas'] = create_device(project_id, "PC Ventas", pc_id, -350, 300, "vpcs")
+    nodes['PC_Admin'] = create_device(project_id, "PC Admin", pc_id, -250, 300, "vpcs")
+    nodes['PC_SrvL1'] = create_device(project_id, "PC Server local 1", pc_id, -100, 300, "vpcs")
+
+    # Edificio LAN C y D (Verde) -> CORREGIDO AL ICONO DE SWITCH
+    nodes['SW_C'] = create_device(project_id, "Switch LAN C", switch_id, 100, 200, "ethernet_switch", ":/symbols/classic/ethernet_switch.svg")
+    nodes['SW_D'] = create_device(project_id, "Switch LAN D", switch_id, 300, 200, "ethernet_switch", ":/symbols/classic/ethernet_switch.svg")
+    nodes['PC_SrvL2'] = create_device(project_id, "PC Server local 2", pc_id, 50, 300, "vpcs")
+    nodes['PC_SrvL3'] = create_device(project_id, "PC Server local 3", pc_id, 150, 300, "vpcs")
+    nodes['PC_SrvL4'] = create_device(project_id, "PC Server local 4", pc_id, 300, 300, "vpcs")
+
+    # 5. CONECTAR CABLES
+    print("🔗 Realizando cableado estructural...")
+    create_link(project_id, nodes['Cloud'], 0, 0, nodes['R3'], 0, 0)
+    
+    # Malla de Routers OSPF
+    create_link(project_id, nodes['R3'], 0, 1, nodes['R2_Core'], 0, 0)
+    create_link(project_id, nodes['R2_Core'], 0, 1, nodes['R2_Left'], 0, 0)
+    create_link(project_id, nodes['R2_Core'], 1, 0, nodes['R2_Right'], 0, 0)
+    create_link(project_id, nodes['R2_Left'], 0, 1, nodes['R2_Right'], 0, 1)
+
+    # Routers a Switches
+    create_link(project_id, nodes['R2_Core'], 2, 0, nodes['SW_Srv'], 0, 0) 
+    create_link(project_id, nodes['R2_Left'], 1, 0, nodes['SW_A'], 0, 0)   
+    create_link(project_id, nodes['R2_Left'], 2, 0, nodes['SW_B'], 0, 0)   
+    create_link(project_id, nodes['R2_Right'], 1, 0, nodes['SW_C'], 0, 0)  
+    create_link(project_id, nodes['R2_Right'], 2, 0, nodes['SW_D'], 0, 0)  
+
+    # Switches a Servidores (Bloque Morado)
+    create_link(project_id, nodes['SW_Srv'], 0, 1, nodes['Srv_Web'], 0, 0)
+    create_link(project_id, nodes['SW_Srv'], 0, 2, nodes['Srv_DNS'], 0, 0)
+    create_link(project_id, nodes['SW_Srv'], 0, 3, nodes['Srv_FTP'], 0, 0)
+
+    # Switches a PCs (Bloque Azul)
+    create_link(project_id, nodes['SW_A'], 0, 1, nodes['PC_Ventas'], 0, 0)
+    create_link(project_id, nodes['SW_A'], 0, 2, nodes['PC_Admin'], 0, 0)
+    create_link(project_id, nodes['SW_B'], 0, 1, nodes['PC_SrvL1'], 0, 0)
+
+    # Switches a PCs (Bloque Verde)
+    create_link(project_id, nodes['SW_C'], 0, 1, nodes['PC_SrvL2'], 0, 0)
+    create_link(project_id, nodes['SW_C'], 0, 2, nodes['PC_SrvL3'], 0, 0)
+    create_link(project_id, nodes['SW_D'], 0, 1, nodes['PC_SrvL4'], 0, 0)
+
+    # 6. CONFIGS
+    print("📝 Subiendo configuraciones de enrutamiento OSPF convergente...")
+    upload_config(project_id, nodes['R3'], configs['R3'])
+    upload_config(project_id, nodes['R2_Core'], configs['R2_Core'])
+    upload_config(project_id, nodes['R2_Left'], configs['R2_Left'])
+    upload_config(project_id, nodes['R2_Right'], configs['R2_Right'])
+
+    # 7. ENCENDER
+    print("🚀 Encendiendo y estabilizando la red...")
+    requests.post(f"{BASE_URL}/projects/{project_id}/nodes/start", json={}, auth=AUTH)
+
+    print("\n✅ ¡MAGNÍFICO! Topología Avanzada desplegada con éxito.")
+    print("Revisa tu entorno GNS3. Ahora verás los recuadros de colores delimitando tus VLANs y los iconos correctos.")
+
+if __name__ == "__main__":
+    main()
