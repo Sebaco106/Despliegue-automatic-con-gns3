@@ -24,7 +24,7 @@ PC_TEMPLATE_NAME = "VPCS"
 configs = {
     # --- ROUTERS OSPF MALLA CENTRAL ---
     "R3": """!
-hostname R3_Borde
+hostname R3
 !
 interface FastEthernet0/0
  description Hacia_Cloud_Internet
@@ -32,7 +32,7 @@ interface FastEthernet0/0
  no shutdown
 !
 interface FastEthernet0/1
- description Hacia_R2_Core
+ description Hacia_R1
  ip address 10.10.10.1 255.255.255.252
  no shutdown
 !
@@ -40,8 +40,8 @@ router ospf 1
  network 10.10.10.0 0.0.0.3 area 0
 !
 """,
-    "R2_Core": """!
-hostname R2_Core
+    "R1": """!
+hostname R1
 !
 interface FastEthernet0/0
  description Hacia_R3
@@ -49,12 +49,12 @@ interface FastEthernet0/0
  no shutdown
 !
 interface FastEthernet0/1
- description Hacia_R2_Left
+ description Hacia_R4
  ip address 10.10.10.9 255.255.255.252
  no shutdown
 !
 interface FastEthernet1/0
- description Hacia_R2_Right
+ description Hacia_R2
  ip address 10.10.10.5 255.255.255.252
  no shutdown
 !
@@ -70,16 +70,16 @@ router ospf 1
  network 192.168.100.0 0.0.0.255 area 0
 !
 """,
-    "R2_Left": """!
-hostname R2_Left
+    "R4": """!
+hostname R4
 !
 interface FastEthernet0/0
- description Hacia_R2_Core
+ description Hacia_R1
  ip address 10.10.10.10 255.255.255.252
  no shutdown
 !
 interface FastEthernet0/1
- description Hacia_R2_Right
+ description Hacia_R2
  ip address 10.10.10.13 255.255.255.252
  no shutdown
 !
@@ -100,16 +100,16 @@ router ospf 1
  network 192.168.20.0 0.0.0.255 area 0
 !
 """,
-    "R2_Right": """!
-hostname R2_Right
+    "R2": """!
+hostname R2
 !
 interface FastEthernet0/0
- description Hacia_R2_Core
+ description Hacia_R1
  ip address 10.10.10.6 255.255.255.252
  no shutdown
 !
 interface FastEthernet0/1
- description Hacia_R2_Left
+ description Hacia_R4
  ip address 10.10.10.14 255.255.255.252
  no shutdown
 !
@@ -247,9 +247,9 @@ def main():
     nodes = {}
     
     nodes['R3'] = create_advanced_router(project_id, "Router R3", router_id, 0, -400)
-    nodes['R2_Core'] = create_advanced_router(project_id, "Router R2_Core", router_id, 0, -200)
-    nodes['R2_Left'] = create_advanced_router(project_id, "Router R2_Left", router_id, -200, 0)
-    nodes['R2_Right'] = create_advanced_router(project_id, "Router R2_Right", router_id, 200, 0)
+    nodes['R1'] = create_advanced_router(project_id, "Router R1", router_id, 0, -200)
+    nodes['R4'] = create_advanced_router(project_id, "Router R4", router_id, -200, 0)
+    nodes['R2'] = create_advanced_router(project_id, "Router R2", router_id, 200, 0)
     
     nodes['Cloud'] = create_device(project_id, "Cloud Internet", pc_id, -200, -500, "vpcs", ":/symbols/classic/cloud.svg")
     
@@ -274,16 +274,16 @@ def main():
     print("🔗 Realizando cableado estructural...")
     create_link(project_id, nodes['Cloud'], 0, 0, nodes['R3'], 0, 0)
     
-    create_link(project_id, nodes['R3'], 0, 1, nodes['R2_Core'], 0, 0)
-    create_link(project_id, nodes['R2_Core'], 0, 1, nodes['R2_Left'], 0, 0)
-    create_link(project_id, nodes['R2_Core'], 1, 0, nodes['R2_Right'], 0, 0)
-    create_link(project_id, nodes['R2_Left'], 0, 1, nodes['R2_Right'], 0, 1)
+    create_link(project_id, nodes['R3'], 0, 1, nodes['R1'], 0, 0)
+    create_link(project_id, nodes['R1'], 0, 1, nodes['R4'], 0, 0)
+    create_link(project_id, nodes['R1'], 1, 0, nodes['R2'], 0, 0)
+    create_link(project_id, nodes['R4'], 0, 1, nodes['R2'], 0, 1)
 
-    create_link(project_id, nodes['R2_Core'], 2, 0, nodes['SW_Srv'], 0, 0) 
-    create_link(project_id, nodes['R2_Left'], 1, 0, nodes['SW_A'], 0, 0)   
-    create_link(project_id, nodes['R2_Left'], 2, 0, nodes['SW_B'], 0, 0)   
-    create_link(project_id, nodes['R2_Right'], 1, 0, nodes['SW_C'], 0, 0)  
-    create_link(project_id, nodes['R2_Right'], 2, 0, nodes['SW_D'], 0, 0)  
+    create_link(project_id, nodes['R1'], 2, 0, nodes['SW_Srv'], 0, 0) 
+    create_link(project_id, nodes['R4'], 1, 0, nodes['SW_A'], 0, 0)   
+    create_link(project_id, nodes['R4'], 2, 0, nodes['SW_B'], 0, 0)   
+    create_link(project_id, nodes['R2'], 1, 0, nodes['SW_C'], 0, 0)  
+    create_link(project_id, nodes['R2'], 2, 0, nodes['SW_D'], 0, 0)  
 
     create_link(project_id, nodes['SW_Srv'], 0, 1, nodes['Srv_Web'], 0, 0)
     create_link(project_id, nodes['SW_Srv'], 0, 2, nodes['Srv_DNS'], 0, 0)
@@ -301,9 +301,9 @@ def main():
     if opcion == "2":
         print("📝 Opción 2 seleccionada: Inyectando OSPF convergente e IPs en todos los Servidores y PCs...")
         upload_config(project_id, nodes['R3'], configs['R3'])
-        upload_config(project_id, nodes['R2_Core'], configs['R2_Core'])
-        upload_config(project_id, nodes['R2_Left'], configs['R2_Left'])
-        upload_config(project_id, nodes['R2_Right'], configs['R2_Right'])
+        upload_config(project_id, nodes['R1'], configs['R1'])
+        upload_config(project_id, nodes['R4'], configs['R4'])
+        upload_config(project_id, nodes['R2'], configs['R2'])
         
         upload_vpcs_config(project_id, nodes['Srv_Web'], configs['Srv_Web'])
         upload_vpcs_config(project_id, nodes['Srv_DNS'], configs['Srv_DNS'])
