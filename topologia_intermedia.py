@@ -126,8 +126,13 @@ def create_router(project_id, name, template_id, x, y):
         "name": name, "node_type": "dynamips", "template_id": template_id, "x": x, "y": y, "compute_id": "local",
         "symbol": ":/symbols/classic/router.svg",
         "properties": {
-            "platform": ROUTER_PLATFORM, "chassis": ROUTER_CHASSIS, "image": ROUTER_IMAGE, "ram": ROUTER_RAM,
-            "slot0": "Leopard-2FE", "slot1": "NM-1FE-TX"     
+            "platform": ROUTER_PLATFORM, 
+            "chassis": ROUTER_CHASSIS, 
+            "image": ROUTER_IMAGE, 
+            "ram": ROUTER_RAM,
+            "startup_config": "startup-config.cfg", # <--- ¡ESTA ES LA LÍNEA QUE FALTABA!
+            "slot0": "Leopard-2FE", 
+            "slot1": "NM-1FE-TX"     
         }
     }
     resp = requests.post(f"{BASE_URL}/projects/{project_id}/nodes", json=payload, auth=AUTH)

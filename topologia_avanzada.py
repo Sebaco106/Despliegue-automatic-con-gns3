@@ -164,7 +164,11 @@ def create_advanced_router(project_id, name, template_id, x, y):
         "name": name, "node_type": "dynamips", "template_id": template_id,
         "x": x, "y": y, "compute_id": "local", "symbol": ":/symbols/classic/router.svg",
         "properties": {
-            "platform": ROUTER_PLATFORM, "chassis": ROUTER_CHASSIS, "image": ROUTER_IMAGE, "ram": ROUTER_RAM,
+            "platform": ROUTER_PLATFORM, 
+            "chassis": ROUTER_CHASSIS, 
+            "image": ROUTER_IMAGE, 
+            "ram": ROUTER_RAM,
+            "startup_config": "startup-config.cfg",
             "slot0": "Leopard-2FE", "slot1": "NM-1FE-TX", "slot2": "NM-1FE-TX", "slot3": "NM-1FE-TX" 
         }
     }
